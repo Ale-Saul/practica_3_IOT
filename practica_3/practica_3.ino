@@ -1,5 +1,5 @@
-#include <WiFi.h>            // Usar la librería WiFi si usas ESP32 o ESP8266
-#include <PubSubClient.h>     // Librería para MQTT
+#include <WiFi.h>
+#include <PubSubClient.h>
 
 // Clase SensorUltrasonico para encapsular la funcionalidad del sensor
 class SensorUltrasonico {
@@ -60,17 +60,18 @@ class ControladorMQTT {
     Led redLed;
     Led whiteLed;
     SensorUltrasonico sensor;
+    unsigned long previousMillis;  // Para controlar el temporizador
 
   public:
     // Constructor
     ControladorMQTT(const char* wifiSSID, const char* wifiPassword, const char* server, int port, const char* user, const char* pass, const char* ledTopic, const char* distanceTopic, Led& rLed, Led& wLed, SensorUltrasonico& sensorProx)
-      : ssid(wifiSSID), password(wifiPassword), mqttServer(server), mqttPort(port), mqttUser(user), mqttPassword(pass), mqttLedTopic(ledTopic), mqttDistanceTopic(distanceTopic), client(espClient), redLed(rLed), whiteLed(wLed), sensor(sensorProx), autoControl(true) {}
+      : ssid(wifiSSID), password(wifiPassword), mqttServer(server), mqttPort(port), mqttUser(user), mqttPassword(pass), mqttLedTopic(ledTopic), mqttDistanceTopic(distanceTopic), client(espClient), redLed(rLed), whiteLed(wLed), sensor(sensorProx), autoControl(true), previousMillis(0) {}
 
     void iniciarWiFi() {
       Serial.begin(115200);
       WiFi.begin(ssid, password);
       while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
+        delay(2000);
         Serial.println("Conectando a WiFi...");
       }
       Serial.println("Conectado a la red WiFi");
@@ -116,8 +117,6 @@ class ControladorMQTT {
 
       if (String(topic) == mqttLedTopic) {
         gestionarControlManual(message);
-      } else if (String(topic) == mqttDistanceTopic) {
-        gestionarControlAutomatico(message);
       }
     }
 
@@ -141,24 +140,34 @@ class ControladorMQTT {
       }
     }
 
-    void gestionarControlAutomatico(String message) {
-      if (message.equalsIgnoreCase("distance")) {
+    // Método para gestionar el control automático basado en la distancia
+    void gestionarControlAutomatico() {
+      if (autoControl) {
         int distance_cm = round(0.01723 * sensor.leerDistancia());
         Serial.print("Distancia medida: ");
         Serial.println(distance_cm);
         client.publish(mqttDistanceTopic, String(distance_cm).c_str());
-        if (autoControl) {
-          if (distance_cm >= 2 && distance_cm <= 20) {
-            redLed.encender();
-            whiteLed.apagar();
-          } else if (distance_cm > 20 && distance_cm <= 60) {
-            whiteLed.encender();
-            redLed.apagar();
-          } else {
-            redLed.apagar();
-            whiteLed.apagar();
-          }
+
+        if (distance_cm >= 2 && distance_cm <= 20) {
+          redLed.encender();
+          whiteLed.apagar();
+        } else if (distance_cm > 20 && distance_cm <= 60) {
+          whiteLed.encender();
+          redLed.apagar();
+        } else {
+          redLed.apagar();
+          whiteLed.apagar();
         }
+      }
+    }
+
+    // Método para gestionar el temporizador y enviar la distancia automáticamente cada segundo
+    void gestionarTemporizador() {
+      unsigned long currentMillis = millis();
+      
+      if (autoControl && (currentMillis - previousMillis >= 1000)) {  // Cada segundo
+        previousMillis = currentMillis;
+        gestionarControlAutomatico();  // Realizar medición y enviar la distancia
       }
     }
 };
@@ -171,7 +180,7 @@ class ControladorMQTT {
 Led redLed(redLedPin);
 Led whiteLed(whiteLedPin);
 SensorUltrasonico sensor(trigger_pin, echo_pin);
-ControladorMQTT controladorMQTT("MiWiFi", "CualContrasena.24", "broker.hivemq.com", 1883, "", "", "casa/led", "casa/distancia", redLed, whiteLed, sensor);
+ControladorMQTT controladorMQTT("Pixel 6 Pro de pollo", "3755484011", "broker.hivemq.com", 1883, "", "", "casa/led", "casa/distancia", redLed, whiteLed, sensor);
 
 void setup() {
   controladorMQTT.iniciarWiFi();
@@ -180,4 +189,6 @@ void setup() {
 
 void loop() {
   controladorMQTT.gestionarMensajes();
+  controladorMQTT.gestionarTemporizador();  // Comienza a enviar la distancia automáticamente cada segundo
 }
+
